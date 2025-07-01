@@ -24,9 +24,9 @@ if data is None or data.empty:
     st.error("❌ Gagal mengunduh data BTC-USD dari Yahoo Finance. Data kosong.")
     st.stop()
 
-required_cols = {"Date", "Close"}
+required_cols = {"Date", "Close", "Open"}
 if not required_cols.issubset(data.columns):
-    st.error(f"❌ Data yang diunduh tidak memiliki kolom {required_cols}")
+    st.error(f"❌ Data yang diunduh tidak memiliki kolom: {required_cols - set(data.columns)}")
     st.stop()
 
 data.reset_index(inplace=True)
@@ -40,6 +40,4 @@ if st.sidebar.button("🔮 Prediksi Sekarang"):
     st.subheader("1. 📈 Data Historis Harga Bitcoin")
     st.write(data.tail())
 
-    def plot_raw():
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=data["Date"], y=data["Open"], name="_
+    d
