@@ -69,17 +69,25 @@ st.markdown("---")
 def load_data(ticker):
     """
     Loads historical data for the given ticker.
+    Adjusted start date to ensure sufficient data is downloaded.
     """
-    data = yf.download(ticker, start="2014-01-01")
+    # Changed start date from "2014-01-01" to "2017-01-01" as reliable data
+    # might not be available that far back on Yahoo Finance, which was causing the error.
+    # The previous log showed YFPricesMissingError for 2014 data. 
+    data = yf.download(ticker, start="2017-01-01")
     data.reset_index(inplace=True)
     return data
 
 data_load_state = st.text('Loading data...')
 try:
     data = load_data('BTC-USD')
+    # Check if data is empty after download
+    if data.empty:
+        st.error("Could not load Bitcoin data. Please check the ticker symbol or the availability of data for the specified date range.")
+        st.stop() # Stop the app if no data is loaded
     data_load_state.text('Loading data... done!')
 except Exception as e:
-    st.error(f"Error loading data: {e}")
+    st.error(f"Error loading data: {e}. Please check your internet connection or the data source.")
     st.stop()
 
 
@@ -112,6 +120,15 @@ if st.sidebar.button('Predict'):
     # Prepare data for Prophet
     df_train = data[['Date', 'Close']]
     df_train = df_train.rename(columns={"Date": "ds", "Close": "y"})
+    
+    # Ensure no NaN values in 'ds' or 'y' after renaming
+    df_train.dropna(subset=['ds', 'y'], inplace=True)
+
+    # Validate that there are enough rows after dropping NaNs
+    if df_train.shape[0] < 2:
+        st.error("Insufficient valid data points to train the Prophet model. Please adjust the data loading parameters or check the data source.")
+        st.stop() # Stop the app if there's not enough data for Prophet 
+
 
     # Initialize and train the model
     m = Prophet(
@@ -120,6 +137,7 @@ if st.sidebar.button('Predict'):
         seasonality_prior_scale=10.0,
         seasonality_mode='multiplicative'
     )
+    # The error "Dataframe has less than 2 non-NaN rows" occurs here if df_train is not sufficient 
     m.fit(df_train)
 
     # Create future dataframe and make predictions
