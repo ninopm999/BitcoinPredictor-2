@@ -71,8 +71,7 @@ def load_data(ticker):
     Loads historical data for the given ticker.
     Adjusted start date to ensure sufficient data is downloaded.
     """
-    # Changed start date from "2014-01-01" to "2017-01-01" because
-    # the log indicated YFPricesMissingError for 2014 data.
+    # Changed start date to "2017-01-01" to improve data availability.
     data = yf.download(ticker, start="2017-01-01")
     data.reset_index(inplace=True)
     return data
@@ -80,7 +79,7 @@ def load_data(ticker):
 data_load_state = st.text('Loading data...')
 try:
     data = load_data('BTC-USD')
-    # Check if data is empty after download
+    # Check if data is empty after download.
     if data.empty:
         st.error("Could not load Bitcoin data. Please check the ticker symbol or the availability of data for the specified date range.")
         st.stop() # Stop the app if no data is loaded
@@ -116,38 +115,41 @@ if st.sidebar.button('Predict'):
     st.header("2. Bitcoin Price Forecast")
     st.write(f"The model will now predict the Bitcoin price for the next {n_years} year(s).")
     
-    # Prepare data for Prophet
+    # Prepare data for Prophet.
+    # Check if 'Date' and 'Close' columns exist before selecting them.
+    if 'Date' not in data.columns or 'Close' not in data.columns:
+        st.error("Missing 'Date' or 'Close' columns in the downloaded data. Cannot proceed with prediction.")
+        st.stop()
+
     df_train = data[['Date', 'Close']]
     df_train = df_train.rename(columns={"Date": "ds", "Close": "y"})
     
-    # Ensure no NaN values in 'ds' or 'y' after renaming
+    # Ensure no NaN values in 'ds' or 'y' after renaming.
     df_train.dropna(subset=['ds', 'y'], inplace=True)
 
-    # Validate that there are enough rows after dropping NaNs
+    # Validate that there are enough rows after dropping NaNs for Prophet.
     if df_train.shape[0] < 2:
-        st.error("Insufficient valid data points to train the Prophet model. Please adjust the data loading parameters or check the data source.")
-        st.stop() # Stop the app if there's not enough data for Prophet
+        st.error("Insufficient valid data points to train the Prophet model after cleaning. Please adjust the data loading parameters or check the data source.")
+        st.stop() 
 
-
-    # Initialize and train the model
+    # Initialize and train the model.
     m = Prophet(
         changepoint_prior_scale=0.15,
         holidays_prior_scale=0.01,
         seasonality_prior_scale=10.0,
         seasonality_mode='multiplicative'
     )
-    # The error "Dataframe has less than 2 non-NaN rows" occurs here if df_train is not sufficient
     m.fit(df_train)
 
-    # Create future dataframe and make predictions
+    # Create future dataframe and make predictions.
     future = m.make_future_dataframe(periods=period)
     forecast = m.predict(future)
 
-    # Display forecast data
+    # Display forecast data.
     st.subheader('Forecast Data')
     st.write(forecast.tail())
 
-    # Plot forecast
+    # Plot forecast.
     st.subheader('Forecast Visualization')
     fig1 = plot_plotly(m, forecast)
     fig1.update_layout(
@@ -157,7 +159,7 @@ if st.sidebar.button('Predict'):
     )
     st.plotly_chart(fig1, use_container_width=True)
 
-    # Plot forecast components
+    # Plot forecast components.
     st.subheader("Forecast Components")
     st.write("These charts show the trend and seasonality components of the forecast.")
     fig2 = plot_components_plotly(m, forecast)
@@ -166,10 +168,10 @@ if st.sidebar.button('Predict'):
     # --- Model Evaluation ---
     st.header("3. Model Performance")
     
-    # Get predictions for the training data period
+    # Get predictions for the training data period.
     forecast_train = m.predict(df_train)
     
-    # Calculate metrics
+    # Calculate metrics.
     r2 = r2_score(df_train['y'], forecast_train['yhat'])
     mae = mean_absolute_error(df_train['y'], forecast_train['yhat'])
 
