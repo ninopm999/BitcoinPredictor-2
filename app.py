@@ -85,8 +85,6 @@ def load_data(ticker, start_date_str):
             return pd.DataFrame() # Return empty DataFrame on failure
         
         # Reset index to bring Date from index to a regular column.
-        # By default, if the index has no name, it becomes a column named 'index'.
-        # If it has a name (like 'Date' from yfinance), it uses that name.
         data.reset_index(inplace=True)
 
         # Determine the name of the date column created by reset_index
@@ -100,23 +98,31 @@ def load_data(ticker, start_date_str):
             st.error(f"Could not find a suitable date column ('Date' or 'index') in the downloaded data for {ticker}. Please ensure data is correctly formatted.")
             return pd.DataFrame()
 
-        # Ensure the date column is consistently named 'Date' for downstream processing
+        # Ensure the date column is consistently named 'Date'
         if date_col_name != 'Date':
             data.rename(columns={date_col_name: 'Date'}, inplace=True)
             
-        # Convert 'Date' column to datetime, coercing any errors to NaT (Not a Time)
-        data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
-        # Drop rows where 'Date' became NaT or 'Close' is NaN
-        data.dropna(subset=['Date', 'Close'], inplace=True)
-
+        # --- Crucial: Check for 'Close' column *before* operations that rely on it ---
         if 'Close' not in data.columns:
             st.error(f"Missing 'Close' price column for {ticker}. Cannot proceed with prediction.")
+            return pd.DataFrame()
+
+        # Convert 'Date' column to datetime, coercing any errors to NaT (Not a Time)
+        data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
+        
+        # Drop rows where 'Date' became NaT or 'Close' is NaN.
+        # Now we are sure 'Date' and 'Close' columns exist.
+        data.dropna(subset=['Date', 'Close'], inplace=True)
+
+        # After dropping NaNs, check if there's still enough data
+        if data.empty:
+            st.warning(f"No valid data points remaining for {ticker} after cleaning. Please try a different date range or ticker.")
             return pd.DataFrame()
 
         return data[['Date', 'Close']].copy() # Return only relevant columns, ensuring a copy to prevent SettingWithCopyWarning
     except Exception as e:
         # Catch any unexpected errors during data downloading or initial processing
-        st.error(f"Error downloading or processing data for {ticker}: {e}. Please check your internet connection or the ticker symbol.")
+        st.error(f"An unexpected error occurred during data processing for {ticker}: {e}. Please check your internet connection or the ticker symbol.")
         return pd.DataFrame()
 
 # --- Sidebar Inputs ---
