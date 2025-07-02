@@ -87,41 +87,39 @@ def load_data(ticker, start_date_str):
         # Reset index to bring Date from index to a regular column.
         data.reset_index(inplace=True)
 
-        # Determine the name of the date column created by reset_index
-        date_col_name = None
-        if 'Date' in data.columns:
-            date_col_name = 'Date'
-        elif 'index' in data.columns: # Sometimes yfinance index might not have a name, default to 'index'
-            date_col_name = 'index'
+        # Identify and ensure 'Date' column is present and correctly named
+        # If 'Date' column doesn't exist, try renaming 'index' to 'Date'
+        if 'Date' not in data.columns and 'index' in data.columns:
+            data.rename(columns={'index': 'Date'}, inplace=True)
         
-        if date_col_name is None:
-            st.error(f"Could not find a suitable date column ('Date' or 'index') in the downloaded data for {ticker}. Please ensure data is correctly formatted.")
+        # If 'Date' is still not found after attempting to rename 'index', it's a critical error
+        if 'Date' not in data.columns:
+            st.error(f"Could not find a 'Date' column in the downloaded data for {ticker}. The data structure might be unexpected.")
             return pd.DataFrame()
 
-        # Ensure the date column is consistently named 'Date'
-        if date_col_name != 'Date':
-            data.rename(columns={date_col_name: 'Date'}, inplace=True)
-            
-        # --- Crucial: Check for 'Close' column *before* operations that rely on it ---
+        # Check for 'Close' column
         if 'Close' not in data.columns:
             st.error(f"Missing 'Close' price column for {ticker}. Cannot proceed with prediction.")
             return pd.DataFrame()
 
-        # Convert 'Date' column to datetime, coercing any errors to NaT (Not a Time)
+        # Convert 'Date' to datetime. Coerce errors, as invalid dates will become NaT.
         data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
         
-        # Drop rows where 'Date' became NaT or 'Close' is NaN.
-        # Now we are sure 'Date' and 'Close' columns exist.
-        data.dropna(subset=['Date', 'Close'], inplace=True)
+        # Select only the necessary columns 'Date' and 'Close'
+        # This step ensures that subsequent operations like dropna only deal with these columns
+        # and explicitly verifies their existence by potentially raising a KeyError here if they're truly missing.
+        df_cleaned = data[['Date', 'Close']].copy()
 
-        # After dropping NaNs, check if there's still enough data
-        if data.empty:
+        # Now drop NaNs from these two columns. This dropna should now be safe.
+        df_cleaned.dropna(subset=['Date', 'Close'], inplace=True)
+
+        if df_cleaned.empty:
             st.warning(f"No valid data points remaining for {ticker} after cleaning. Please try a different date range or ticker.")
             return pd.DataFrame()
 
-        return data[['Date', 'Close']].copy() # Return only relevant columns, ensuring a copy to prevent SettingWithCopyWarning
+        return df_cleaned # Return the cleaned DataFrame
     except Exception as e:
-        # Catch any unexpected errors during data downloading or initial processing
+        # Generic catch for any other unexpected errors during data downloading or processing
         st.error(f"An unexpected error occurred during data processing for {ticker}: {e}. Please check your internet connection or the ticker symbol.")
         return pd.DataFrame()
 
