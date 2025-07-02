@@ -7,7 +7,7 @@ from prophet.diagnostics import cross_validation, performance_metrics
 from sklearn.metrics import r2_score, mean_absolute_error
 import plotly.graph_objs as go
 import datetime
-import numpy as np # For numerical operations, e.g., handling NaNs
+import numpy as np 
 
 # Set page configuration
 st.set_page_config(page_title="Advanced Bitcoin Price Predictor",
@@ -76,7 +76,7 @@ st.markdown("---")
 def load_data(ticker, start_date_str):
     """
     Loads historical data for the given ticker from a specified start date.
-    Includes error handling for yfinance download issues.
+    Includes robust error handling for yfinance download issues and column identification.
     """
     try:
         data = yf.download(ticker, start=start_date_str)
@@ -84,20 +84,40 @@ def load_data(ticker, start_date_str):
             st.warning(f"No data downloaded for {ticker} from {start_date_str}. Please check the ticker and date range.")
             return pd.DataFrame() # Return empty DataFrame on failure
         
+        # Reset index to bring Date from index to a regular column.
+        # By default, if the index has no name, it becomes a column named 'index'.
+        # If it has a name (like 'Date' from yfinance), it uses that name.
         data.reset_index(inplace=True)
-        # Convert Date column to datetime, coercing errors
+
+        # Determine the name of the date column created by reset_index
+        date_col_name = None
+        if 'Date' in data.columns:
+            date_col_name = 'Date'
+        elif 'index' in data.columns: # Sometimes yfinance index might not have a name, default to 'index'
+            date_col_name = 'index'
+        
+        if date_col_name is None:
+            st.error(f"Could not find a suitable date column ('Date' or 'index') in the downloaded data for {ticker}. Please ensure data is correctly formatted.")
+            return pd.DataFrame()
+
+        # Ensure the date column is consistently named 'Date' for downstream processing
+        if date_col_name != 'Date':
+            data.rename(columns={date_col_name: 'Date'}, inplace=True)
+            
+        # Convert 'Date' column to datetime, coercing any errors to NaT (Not a Time)
         data['Date'] = pd.to_datetime(data['Date'], errors='coerce')
-        # Drop rows where 'Date' became NaT due to conversion errors
-        data.dropna(subset=['Date'], inplace=True)
+        # Drop rows where 'Date' became NaT or 'Close' is NaN
+        data.dropna(subset=['Date', 'Close'], inplace=True)
 
         if 'Close' not in data.columns:
             st.error(f"Missing 'Close' price column for {ticker}. Cannot proceed with prediction.")
-            return pd.DataFrame() # Return empty DataFrame if critical column is missing
+            return pd.DataFrame()
 
-        return data[['Date', 'Close']].copy() # Return only relevant columns, ensuring a copy
+        return data[['Date', 'Close']].copy() # Return only relevant columns, ensuring a copy to prevent SettingWithCopyWarning
     except Exception as e:
-        st.error(f"Error downloading data for {ticker}: {e}. Please check your internet connection or the ticker symbol.")
-        return pd.DataFrame() # Return empty DataFrame on exception
+        # Catch any unexpected errors during data downloading or initial processing
+        st.error(f"Error downloading or processing data for {ticker}: {e}. Please check your internet connection or the ticker symbol.")
+        return pd.DataFrame()
 
 # --- Sidebar Inputs ---
 st.sidebar.header("Data & Prediction Settings")
@@ -125,14 +145,15 @@ season_scale = st.sidebar.slider('Seasonality Prior Scale (strength):', 0.1, 20.
 
 # Main prediction button
 if st.sidebar.button('Run Prediction'):
-    data_load_state = st.text('Loading data...')
+    data_load_status = st.empty() # Placeholder for loading status messages
+    data_load_status.text('Loading data...')
     data = load_data(selected_ticker, start_date.strftime("%Y-%m-%d"))
     
     if data.empty:
-        data_load_state.text('Data loading failed or no data found.')
+        data_load_status.text('Data loading failed or no data found.')
         st.stop() # Stop execution if data is not loaded successfully
     else:
-        data_load_state.text(f'Loading data for {selected_ticker} from {start_date} done!')
+        data_load_status.text(f'Loading data for {selected_ticker} from {start_date} done!')
 
     st.header(f"1. Raw {selected_ticker} Price Data")
     st.write(f"Displaying the last few rows of historical price data for {selected_ticker}.")
@@ -168,7 +189,7 @@ if st.sidebar.button('Run Prediction'):
     st.info("Training the Prophet model...")
     m = Prophet(
         changepoint_prior_scale=cp_scale,
-        holidays_prior_scale=0.01, # Can be exposed as a slider if needed
+        holidays_prior_scale=0.01, # Can be exposed as a slider if needed in future
         seasonality_prior_scale=season_scale,
         seasonality_mode='multiplicative' # Good for crypto where volatility increases with price
     )
@@ -176,7 +197,14 @@ if st.sidebar.button('Run Prediction'):
     st.success("Model training complete!")
 
     # Create future dataframe and make predictions
-    period = n_years * (365 if prophet_freq == 'D' else (52 if prophet_freq == 'W' else 12)) # Approximate periods for yearly freq
+    # Calculate rough number of periods based on years and frequency
+    if prophet_freq == 'D':
+        period = n_years * 365
+    elif prophet_freq == 'W':
+        period = n_years * 52
+    elif prophet_freq == 'M':
+        period = n_years * 12
+
     future = m.make_future_dataframe(periods=period, freq=prophet_freq)
     forecast = m.predict(future)
 
@@ -245,9 +273,11 @@ if st.sidebar.button('Run Prediction'):
         
         # Calculate reasonable initial and period values based on total data length
         total_days = (df_train['ds'].max() - df_train['ds'].min()).days
-        initial_days = max(365 * 2, int(total_days * 0.5)) # At least 2 years, or 50% of data
-        period_days = max(30, int(total_days * 0.1)) # At least 1 month, or 10% of data
-        horizon_days = 90 # 3 months forecast horizon for evaluation
+        # Ensure initial training period is at least 2 years or 50% of data, whichever is smaller
+        initial_days = min(365 * 2, int(total_days * 0.5)) 
+        # Ensure period between cutoffs is at least 1 month or 10% of data, whichever is smaller
+        period_days = min(30, int(total_days * 0.1)) 
+        horizon_days = 90 # Default 3 months forecast horizon for evaluation
 
         initial_cv = st.text_input("Initial training period (e.g., '730 days' for 2 years):", f"{initial_days} days")
         period_cv = st.text_input("Period between cutoffs (e.g., '180 days' for 6 months):", f"{period_days} days")
@@ -276,11 +306,11 @@ if st.sidebar.button('Run Prediction'):
                     These metrics show how the model's errors change as the forecast horizon increases.
                     - **RMSE (Root Mean Squared Error)**: Measures the average magnitude of the errors.
                     - **MAE (Mean Absolute Error)**: Measures the average magnitude of the errors without considering direction.
-                    You want both RMSE and MAE to be as low as possible.
+                    You want both RMSE and MAE to be as low as possible. A consistent increase in errors with horizon is typical.
                     """)
 
                 except Exception as e:
-                    st.error(f"Error during cross-validation: {e}. Please check the input periods and ensure enough historical data is available.")
+                    st.error(f"Error during cross-validation: {e}. Please check the input periods and ensure enough historical data is available. Ensure your initial training period is long enough to train the model properly.")
 
 else:
     st.info('Adjust the prediction parameters in the sidebar and click "Run Prediction" to start the forecast.')
